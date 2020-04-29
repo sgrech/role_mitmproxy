@@ -1,0 +1,58 @@
+---
+- name: Get mitmproxy binaries
+  get_url:
+    url: "https://snapshots.mitmproxy.org/{{ mitmproxy_ver }}/mitmproxy-{{ mitmproxy_ver }}-linux.tar.gz"
+    dest: "/tmp/mitmproxy-{{ mitmproxy_ver }}-linux.tar.gz"
+
+- name: Extract binaries
+  unarchive:
+    src: "/tmp/mitmproxy-{{ mitmproxy_ver }}-linux.tar.gz"
+    dest: "{{ bin_path }}"
+    remote_src: yes
+
+- name: Change binary permissions
+  file:
+    path: "{{ bin_path }}{{ item }}"
+    mode: 0755
+  loop:
+    - mitmdump
+    - mitmproxy
+    - mitmweb
+
+- name: Enable ip forwarding
+  sysctl:
+    name: "{{ item }}"
+    value: "1"
+    state: present
+  loop:
+    - net.ipv4.ip_forward
+    - net.ipv6.conf.all.forwarding
+
+- name: Disable icmp requests
+  sysctl:
+    name: net.ipv4.conf.all.send_redirects
+    value: "0"
+    state: present
+
+- name: Create an iptables ruleset that redirects the desired traffic to mitmproxy
+  iptables:
+    table: nat
+    chain: PREROUTING
+    in_interface: eth1
+    protocol: tcp
+    destination_port: "{{ item.destination_port }}"
+    jump: REDIRECT
+    to_ports: "{{ item.to_ports }}"
+  with_items:
+    - destination_port: 80
+      to_ports: 8080
+    - destination_port: 443
+      to_ports: 8080
+
+- name: Open port 8080 for direct proxy
+  iptables:
+    chain: INPUT
+    in_interface: eth1
+    protocol: tcp
+    destination_port: "8080"
+    jump: ACCEPT
